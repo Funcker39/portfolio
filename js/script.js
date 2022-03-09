@@ -3,14 +3,39 @@ const lerp = (x, y, a) => x * (1 - a) + y * a;
 const clamp = (a, min = 0, max = 1) => Math.min(max, Math.max(min, a));
 const getRandomInt = (max) => Math.floor(Math.random() * max);
 
+let zoom = 1;
+
 class Tree {
-    constructor(basePoint, maxBranches = 50, maxSteps = 40, angleDeviation = 30, maxHeight = 400) {
+    constructor(basePoint, maxBranches = 50, maxSteps = 40, angleDeviation = 30, maxHeight = 400, branchChance = .8, leafDensity = 1, leafRadius = 4) {
         this.basePoint = basePoint;
         this.maxBranches = maxBranches;
         this.currentStep = 1;
         this.maxSteps = maxSteps;
         this.angleDeviation = angleDeviation;
-        this.heightStep = maxHeight / maxSteps;
+        this.heightStep = (maxHeight / maxSteps) * (canvas.height / 1000);
+        this.branchChance = clamp(branchChance, 0, 1);
+        this.leafDensity = leafDensity;
+        this.leafRadius = leafRadius;
+
+        basePoint.setWidth = basePoint.width * (canvas.width / 1000);
+    }
+
+    set progression(value) {
+        value = clamp(value, 0, 1);
+        let stepOffset = Math.round(value * this.maxSteps) - this.currentStep;
+        console.log(stepOffset)
+        
+        if (stepOffset == 0) return;
+
+        if (stepOffset > 0) {
+            if (tree.currentStep >= tree.maxSteps) return;
+            this.grow(stepOffset);
+        } else {
+            if (tree.currentStep <= 1) return;
+            this.rewind(-stepOffset);
+        }
+        
+        tree.draw()
     }
 
     grow (iterations) {
@@ -23,8 +48,11 @@ class Tree {
             this.basePoint.pushEndPoints(endPoints);
             
             for (const point of endPoints) {
-                let divisions = Math.random() > 0.8 ? 2 : 1;
+                let divisions = Math.random() < this.branchChance ? 2 : 1;
                 if (point.branches >= this.maxBranches) divisions = 1;
+                if (point.branches < 2) {
+                    if (this.currentStep > this.maxSteps / 5) divisions = 2;
+                } 
 
                 for (let i = 0; i < divisions; i++) {
                     let subPointAngle = point.angle + (Math.random() * 2 - 1) * this.angleDeviation;
@@ -48,7 +76,9 @@ class Tree {
                         subPointDir,
                         subPointAngle,
                         [],
-                        point.branches + divisions - 1
+                        point.branches + divisions - 1,
+                        this.leafDensity,
+                        this.leafRadius
                     ));
                 } 
             }
@@ -57,7 +87,7 @@ class Tree {
 
     rewind (iterations) {
         for (let i = 0; i < iterations; i++) {
-            if (this.basePoint.subPoints[0].isEndpoint) return;
+            if (this.basePoint.subPoints[0].isEndpoint || this.currentStep <= 1) return;
             this.currentStep--;
 
             this.basePoint.setWidth = this.basePoint.width - 2;
@@ -71,7 +101,13 @@ class Tree {
         }
     }
 
-    draw(ctx) {
+    draw() {
+
+        //TEST ZOOM
+        // ctx.translate(canvas.width / 2, canvas.height - 10);
+        // ctx.scale(zoom, zoom);
+        // ctx.translate(0, 0);
+
         ctx.clearRect(0,0,canvas.width,canvas.height);
         ctx.lineWidth = 0;
 
@@ -85,15 +121,20 @@ class Tree {
                 `rgb(${lerp(102, 255, leafColorTime)}, ${lerp(255, 128, leafColorTime)}, ${lerp(102, 230, leafColorTime)}`
             ],
             `rgb(${lerp(51, 77, woodColorTime)}, ${lerp(204, 38, woodColorTime)}, ${lerp(51, 0, woodColorTime)}`
-            );
+            );   
 
-        
+        ctx.fillStyle = 'black';
+        // ctx.fillRect(0, canvas.height - 120, canvas.width, canvas.height);
+        ctx.beginPath()
+        ctx.arc(canvas.width / 2, canvas.height + 1870, 2000, 0, 360);
+        ctx.closePath();
+        ctx.fill();
     }
 }
 
 class Point {
 
-    constructor(parent, position, width, dir = new Vector2D(0, -1), angle = 0, subPoints = [], branches = 1) {
+    constructor(parent, position, width, dir = new Vector2D(0, -1), angle = 0, subPoints = [], branches = 1, leafDensity = 1, leafRadius = 4) {
         this.position = position;
         this.width = width;
         this.subPoints = subPoints;
@@ -102,6 +143,8 @@ class Point {
         this.branches = branches;
         this.leaves = [];
         this.parent = parent;
+        this.leafDensity = leafDensity;
+        this.leafRadius = leafRadius;
         
         this.update();
     }
@@ -119,7 +162,7 @@ class Point {
 
         if (!this.isEndpoint) {
             if (this.branches > 3) {
-                this.generateLeaves(0, 2, 10);
+                this.generateLeaves(0, 2);
             }
             else {
                 this.leaves = [];
@@ -127,18 +170,19 @@ class Point {
         } else {
             this.generateLeaves(1, 3);
         }
+
     }
 
-    generateLeaves(min = 0, max = 1, offset = 7) {
+    generateLeaves(min = 0, max = 1) {
         this.leaves = [];
-        let amount = Math.floor(Math.random() * (max - min)) + min;
+        let amount = Math.floor(Math.random() * (max - min) * this.leafDensity) + min;
         for (let i = 0; i < amount; i++) {
             let leaf = {};
+            leaf.radius = (this.leafRadius * (1 + Math.random() * .5));
             leaf.offset = new Vector2D(
-                (Math.random() * 2 - 1) * offset,
-                (Math.random() * 2 - 1) * offset
+                (Math.random() * 2 - 1) * ((this.width / 2) + leaf.radius),
+                (Math.random() * 2 - 1) * ((this.width / 2) + leaf.radius)
                 );
-            leaf.radius = (7 + Math.random() * 3);
             this.leaves.push(leaf);
         }
     }
@@ -177,8 +221,9 @@ class Point {
             for (const subPoint of this.subPoints) {
                 ctx.shadowBlur = 0;
 
-                ctx.fillStyle = woodColor;
-                ctx.strokeStyle = woodColor;
+                let color = 'black'
+                ctx.fillStyle = color;
+                ctx.strokeStyle = color;
 
                 ctx.beginPath();
                 ctx.moveTo(this.leftCornerPosition.x, this.leftCornerPosition.y);
@@ -200,7 +245,9 @@ class Point {
             /*ctx.shadowBlur = 3;
             ctx.shadowColor = 'black';*/
 
-            let color = leafColors[getRandomInt(leafColors.length)];
+            // let color = leafColors[getRandomInt(leafColors.length)];
+            // let color = 'rgba(255,255,255,.3)'
+            let color = 'rgba(0,0,0,0.2)'
             ctx.fillStyle = color;
             ctx.strokeStyle = color;
 
@@ -229,39 +276,73 @@ class Vector2D {
 
 var canvas = document.getElementById('background');
 var ctx = canvas.getContext('2d');
-document.body.onwheel = scroll;
+document.body.onscroll = scroll;
+document.body.onclick = click;
+
 
 canvas.height = window.innerHeight;
 canvas.width = window.innerWidth;
+var docHeight = (document.height !== undefined) ? document.height : document.body.offsetHeight;
 
 var tree = new Tree(new Point(
     null,
-    new Vector2D(400, canvas.height - 10),
+    new Vector2D(canvas.width / 2 - 8, canvas.height - 120),
     8,
     new Vector2D(0,-1),
     0,
     [],
     1
     ),
-    maxBranches = 10,
-    maxSteps = 30,
+    maxBranches = 5,
+    maxSteps = 40,
     angleDeviation = 30,
-    maxHeight = 750
+    maxHeight = 500,
+    branchChance = .15,
+    leafDensity = 1,
+    leafRadius = 4
     );
-tree.basePoint.subPoints = [new Point(tree.basePoint, new Vector2D(400, canvas.height - 30), 5)];
+tree.basePoint.subPoints = [new Point(tree.basePoint, new Vector2D(tree.basePoint.position.x, tree.basePoint.position.y - 30), tree.basePoint.width * .7)];
 tree.basePoint.update();
-tree.draw(ctx);
+tree.draw();
 
 function scroll(event) {
-    event.preventDefault();
+    let pageProgression = clamp(window.scrollY / (docHeight - window.innerHeight), 0,1)
 
-    if (event.deltaY < 0) {
-        if (tree.currentStep >= tree.maxSteps) return;
-        tree.grow(1);
-    } else {
-        if (tree.currentStep <= 1) return;
-        tree.rewind(1);
-    }
+    tree.progression = pageProgression;
 
-    tree.draw(ctx);
+    canvas.style.top = (1 - pageProgression) * 100 + 'px';
 }
+
+function click(event) {
+    if (tree.currentStep == 1) {
+        tree.grow(tree.maxSteps);
+    } else {
+        tree.rewind(tree.maxSteps);
+    }
+    tree.draw();
+}
+
+
+
+// EXPERIMENTAL TOUCH
+
+// document.body.addEventListener("touchstart", handleStart, false);
+// document.body.addEventListener("touchmove", handleMove, false);
+
+// let lastTouchY = 0;
+// let move = 0;
+
+// function handleStart(evt) {
+//     lastTouchY = evt.changedTouches[0].pageY;
+//     move = 0;
+// }
+
+// function handleMove(evt) {
+//     move += evt.changedTouches[0].pageY - lastTouchY;
+//     lastTouchY = evt.changedTouches[0].pageY;
+
+//     if (Math.abs(move) > 10) {
+//         treeGrowth(move)
+//         move = 0;
+//     }
+// }
